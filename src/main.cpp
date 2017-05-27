@@ -34,26 +34,32 @@ int main()
 {
   uWS::Hub h;
 
-  PID pid;
   // TODO: Initialize the pid variable.
-  std::ifstream myConfig ("./config.txt");
-  if (myConfig.is_open()) {
-    double Kp, Kd, Ki;
-    myConfig >> Kp;
-    myConfig >> Ki;
-    myConfig >> Kd;
-
-    pid.Init(Kp, Ki, Kd);
-    std::cout << "Kp:" << pid.Kp;
-    std::cout << " Ki:" << pid.Ki;
-    std::cout << " Kd:" << pid.Kd << std::endl;
+  PID pid;
+  // Write initial config to file, avoid recompile while
+  // tuning PID control parameters
+  // 0.2 0.0 1.0 as a good start
+  std::ofstream logfile;
+  std::string logfilename = "./pid.log";
+  logfile.open(logfilename);
+  if (logfile.is_open()) {
+    std::cout << "Writing log to" << logfilename << std::endl;
+    logfile << "Start PID control\n";
   } else {
-    std::cout << "Can't find config.txt" << std::endl;
+    std::cout << "Failed to open log file " << logfilename << std::endl;
     return 0;
   }
 
+  // Coordinate Descent
+  double p[3] = {1.2, 0.0, 4.3};
+  double dp[3] = {0.07, 0.000001, 0.24};
+  double best_err = 999999;
+  bool initialized = false;
+  int cycle = 0;    // num of trained cycles
+  int step = 0;     // num steps trained in this cycle
+  int phase = 0;    // current phase in coordinate descent cycle
 
-  h.onMessage([&pid](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+  h.onMessage([&pid, &cycle, &step, &p, &dp, &best_err, &logfile, &phase, &initialized](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -61,6 +67,24 @@ int main()
     {
       auto s = hasData(std::string(data).substr(0, length));
       if (s != "") {
+        if (!initialized && step == 0) {
+          pid.Init(p[0], p[1], p[2]);
+          logfile << "Init: p[" << p[0] << "," << p[1] << "," << p[2] << "]" << std::endl;
+
+        } else if (step == 0) {
+          int direction = cycle % 3;    // current descent direction
+          if (phase == 0){  // phase 0, start of a new cycle
+            logfile << "Cycle " << cycle << ": dp[" << dp[0] << "," << dp[1] << "," << dp[2] << "]" << std::endl;
+            p[direction] += dp[direction];
+            pid.Init(p[0], p[1], p[2]);
+          } else if (phase == 1) {  // phase 1, err >= best_err, try another direction
+            p[direction] -= 2 * dp[direction];
+            pid.Init(p[0], p[1], p[2]);
+          }
+          logfile << "\tp[" << p[0] << "," << p[1] << "," << p[2] << "]" << std::endl;
+        }
+
+        // Train PID control
         auto j = json::parse(s);
         std::string event = j[0].get<std::string>();
         if (event == "telemetry") {
@@ -69,7 +93,6 @@ int main()
           double speed = std::stod(j[1]["speed"].get<std::string>());
           double angle = std::stod(j[1]["steering_angle"].get<std::string>());
           double steer_value;
-          double throttle;
           /*
           * TODO: Calcuate steering value here, remember the steering value is
           * [-1, 1].
@@ -77,19 +100,54 @@ int main()
           * another PID controller to control the speed!
           */
           pid.UpdateError(cte);
-          steer_value = pid.steer_value;
-          throttle = pid.throttle;
-
-          // DEBUG
-          std::cout << "CTE: " << cte << " Steering Value: " << steer_value << std::endl;
 
           json msgJson;
-          msgJson["steering_angle"] = steer_value;
-          msgJson["throttle"] = throttle;
+          msgJson["steering_angle"] = pid.steer_value;
+          msgJson["throttle"] = pid.throttle;
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          std::cout << msg << std::endl;
+          // std::cout << msg << std::endl;
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
+
+        // On finish, compare error and descent dp
+        step += 1;
+        if (step % 100 == 0) {
+          std::cout << "step:" << step << std::endl;
+        }
+        // End of this cycle
+        if (step == 700) {
+          if (!initialized) {
+            best_err = pid.TotalError();
+            initialized = true;
+            logfile << "Initial best_err: " << best_err << std::endl;
+          } else {
+
+            // Update delta according to error change
+            int direction = cycle % 3;    // current descent direction
+            double pid_err = pid.TotalError();
+            logfile << "pid_err:" << pid_err << " best_err:" << best_err << std::endl;
+            if (pid_err < best_err) {
+              best_err = pid_err;
+              dp[direction] *= 1.1;
+              phase = 0;
+              cycle += 1;
+            } else {
+              phase += 1;
+              if (phase == 2) {  // already tried 2 directions
+                p[direction] += dp[direction];
+                dp[direction] *= 0.9;
+                phase = 0;
+                cycle += 1;
+              }
+            }
+          }
+
+          // Reset for next training cycle
+          step = 0;
+          std::string reset_msg = "42[\"reset\", {}]";
+          ws.send(reset_msg.data(), reset_msg.length(), uWS::OpCode::TEXT);
+        }
+
       } else {
         // Manual driving
         std::string msg = "42[\"manual\",{}]";
@@ -117,8 +175,9 @@ int main()
     std::cout << "Connected!!!" << std::endl;
   });
 
-  h.onDisconnection([&h](uWS::WebSocket<uWS::SERVER> ws, int code, char *message, size_t length) {
+  h.onDisconnection([&h, &logfile](uWS::WebSocket<uWS::SERVER> ws, int code, char *message, size_t length) {
     ws.close();
+    logfile.close();
     std::cout << "Disconnected" << std::endl;
   });
 

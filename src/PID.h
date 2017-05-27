@@ -47,6 +47,7 @@ public:
    */
   double steer_value;
   double throttle;
+  double total_error;
 
 };
 
