@@ -51,8 +51,8 @@ int main()
   }
 
   // Coordinate Descent
-  double p[3] = {1.2, 0.0, 4.3};
-  double dp[3] = {0.07, 0.000001, 0.24};
+  double p[3] = {1.91917,0.0,15.744};
+  double dp[3] = {0.1, 0.00001, 0.1};
   double best_err = 999999;
   bool initialized = false;
   int cycle = 0;    // num of trained cycles
@@ -68,6 +68,10 @@ int main()
       auto s = hasData(std::string(data).substr(0, length));
       if (s != "") {
         if (!initialized && step == 0) {
+          // force reset at the start
+          std::string reset_msg = "42[\"reset\", {}]";
+          ws.send(reset_msg.data(), reset_msg.length(), uWS::OpCode::TEXT);
+
           pid.Init(p[0], p[1], p[2]);
           logfile << "Init: p[" << p[0] << "," << p[1] << "," << p[2] << "]" << std::endl;
 
@@ -114,8 +118,9 @@ int main()
         if (step % 100 == 0) {
           std::cout << "step:" << step << std::endl;
         }
+
         // End of this cycle
-        if (step == 700) {
+        if (step == 1200) {
           if (!initialized) {
             best_err = pid.TotalError();
             initialized = true;

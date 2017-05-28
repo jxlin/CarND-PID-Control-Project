@@ -31,13 +31,13 @@ void PID::UpdateError(double cte) {
   d_error = cte - p_error;
   p_error = cte;
   i_error += cte;
-  total_error += cte * cte;  // sum of square error
+  total_error += fabs(cte);  // sum of square error
 
   steer_value = - Kp * p_error - Ki * i_error - Kd * d_error;
   steer_value = fmax(-1.0, steer_value);
   steer_value = fmin(1.0, steer_value);
 
-  throttle = 0.45f;
+  throttle = 0.40f;
 }
 
 double PID::TotalError() {
