@@ -50,16 +50,30 @@ int main()
     return 0;
   }
 
-  // Coordinate Descent
-  double p[3] = {1.91917,0.0,15.744};
-  double dp[3] = {0.1, 0.00001, 0.1};
-  double best_err = 999999;
-  bool initialized = false;
+  // Gradient Descent parameters
+  double p[3] = {0.559343,7.89516e-06,11.8724};
+  // Starts with all zero if you're training from scratch
+  // double p[3] = {0.0, 0.0, 0.0};
+
+  double dp[3] = {0.005, 1e-6, 1.0};
+  double gradients[3] = {0.0, 0.0, 0.0};
+
+  // custom step size for 3 different dimensions, increases training speed
+  double step_size[3] = {0.05, 1e-8, 1000.0};
+  double orig_err;
   int cycle = 0;    // num of trained cycles
   int step = 0;     // num steps trained in this cycle
-  int phase = 0;    // current phase in coordinate descent cycle
+  // I defined 4 phase for training
+  //   phase 0: Calculate the error of W(p[0], p[1], p[2])
+  //   phase 1: Calculate the error of W(p[0]+dp[0], p[1], p[2])
+  //   phase 2: Calculate the error of W(p[0], p[1]+dp[1], p[2])
+  //   phase 3: Calculate the error of W(p[0], p[1], p[2]+dp[2])
+  int phase = 0;
 
-  h.onMessage([&pid, &cycle, &step, &p, &dp, &best_err, &logfile, &phase, &initialized](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
+  int steps_2_run = 999999;
+  // int steps_2_run = 500;   // uncomment this line for training mode
+
+  h.onMessage([&pid, &cycle, &step, &p, &dp, &step_size, &steps_2_run, &gradients, &orig_err, &logfile, &phase](uWS::WebSocket<uWS::SERVER> ws, char *data, size_t length, uWS::OpCode opCode) {
     // "42" at the start of the message means there's a websocket message event.
     // The 4 signifies a websocket message
     // The 2 signifies a websocket event
@@ -67,25 +81,32 @@ int main()
     {
       auto s = hasData(std::string(data).substr(0, length));
       if (s != "") {
-        if (!initialized && step == 0) {
-          // force reset at the start
+        // start of a new cycle
+        if (step == 0) {
+
+          // force reset at the beginning of each cycle
           std::string reset_msg = "42[\"reset\", {}]";
           ws.send(reset_msg.data(), reset_msg.length(), uWS::OpCode::TEXT);
 
-          pid.Init(p[0], p[1], p[2]);
-          logfile << "Init: p[" << p[0] << "," << p[1] << "," << p[2] << "]" << std::endl;
+          // reset steering angle and throttle
+          json msgJson;
+          msgJson["steering_angle"] = 0.0;
+          msgJson["throttle"] = 0.4;
+          auto msg = "42[\"steer\"," + msgJson.dump() + "]";
+          ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
 
-        } else if (step == 0) {
-          int direction = cycle % 3;    // current descent direction
-          if (phase == 0){  // phase 0, start of a new cycle
-            logfile << "Cycle " << cycle << ": dp[" << dp[0] << "," << dp[1] << "," << dp[2] << "]" << std::endl;
+          if (phase == 0) {
+            pid.Init(p[0], p[1], p[2]);
+            logfile << "Start cycle: " << cycle << std::endl;
+
+          } else {
+            int direction = (phase - 1);
             p[direction] += dp[direction];
             pid.Init(p[0], p[1], p[2]);
-          } else if (phase == 1) {  // phase 1, err >= best_err, try another direction
-            p[direction] -= 2 * dp[direction];
-            pid.Init(p[0], p[1], p[2]);
+            p[direction] -= dp[direction];
           }
-          logfile << "\tp[" << p[0] << "," << p[1] << "," << p[2] << "]" << std::endl;
+          logfile << "\tphase: " << phase <<" pid.Init(" << pid.Kp << ",";
+          logfile << pid.Ki << "," << pid.Kd << ")" << std::endl;
         }
 
         // Train PID control
@@ -96,61 +117,63 @@ int main()
           double cte = std::stod(j[1]["cte"].get<std::string>());
           double speed = std::stod(j[1]["speed"].get<std::string>());
           double angle = std::stod(j[1]["steering_angle"].get<std::string>());
-          double steer_value;
           /*
           * TODO: Calcuate steering value here, remember the steering value is
           * [-1, 1].
           * NOTE: Feel free to play around with the throttle and speed. Maybe use
           * another PID controller to control the speed!
           */
-          pid.UpdateError(cte);
+          pid.UpdateError(cte, speed, angle);
 
           json msgJson;
           msgJson["steering_angle"] = pid.steer_value;
           msgJson["throttle"] = pid.throttle;
           auto msg = "42[\"steer\"," + msgJson.dump() + "]";
-          // std::cout << msg << std::endl;
           ws.send(msg.data(), msg.length(), uWS::OpCode::TEXT);
         }
 
-        // On finish, compare error and descent dp
         step += 1;
+        // debug logging
         if (step % 100 == 0) {
-          std::cout << "step:" << step << std::endl;
+          std::cout << "cycle: " << cycle <<  " step: " << step << std::endl;
         }
 
-        // End of this cycle
-        if (step == 1200) {
-          if (!initialized) {
-            best_err = pid.TotalError();
-            initialized = true;
-            logfile << "Initial best_err: " << best_err << std::endl;
-          } else {
+        // on cycle finish, calculate the gradient
+        if (step == steps_2_run) {
+          // average loss since steps_2_run increases over cycle
+          double pid_err = pid.TotalError() / steps_2_run;
+          logfile << "\t  err:" << pid_err << std::endl;
 
-            // Update delta according to error change
-            int direction = cycle % 3;    // current descent direction
-            double pid_err = pid.TotalError();
-            logfile << "pid_err:" << pid_err << " best_err:" << best_err << std::endl;
-            if (pid_err < best_err) {
-              best_err = pid_err;
-              dp[direction] *= 1.1;
-              phase = 0;
-              cycle += 1;
-            } else {
-              phase += 1;
-              if (phase == 2) {  // already tried 2 directions
-                p[direction] += dp[direction];
-                dp[direction] *= 0.9;
-                phase = 0;
-                cycle += 1;
-              }
-            }
+          // calculate gradient and save for later update step
+          if (phase == 0) {
+            orig_err = pid_err;
+          } else {
+            int direction = (phase - 1);
+            double gradient = (pid_err - orig_err) / dp[direction];
+            gradients[direction] = gradient;
           }
 
-          // Reset for next training cycle
+          // end of cycle, update p[] by gradient
+          if (phase == 3) {
+            logfile << "\tupdate p by";
+            for(int i=0; i<3; i++) {
+              double s = step_size[i];
+              double g = gradients[i];
+              p[i] -= s * g;
+              logfile << " " << -s*g << ",";
+            }
+            logfile << std::endl;
+
+            // setup for next cycle
+            cycle += 1;
+            phase = 0;
+            step = 0;
+            steps_2_run += 20;
+            return;
+          }
+
+          phase += 1;
           step = 0;
-          std::string reset_msg = "42[\"reset\", {}]";
-          ws.send(reset_msg.data(), reset_msg.length(), uWS::OpCode::TEXT);
         }
 
       } else {

@@ -35,7 +35,7 @@ public:
   /*
   * Update the PID error variables given cross track error.
   */
-  void UpdateError(double cte);
+  void UpdateError(double cte, double speed, double angle);
 
   /*
   * Calculate the total PID error.
