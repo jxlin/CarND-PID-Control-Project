@@ -33,12 +33,7 @@ std::string hasData(std::string s) {
 int main()
 {
   uWS::Hub h;
-
-  // TODO: Initialize the pid variable.
   PID pid;
-  // Write initial config to file, avoid recompile while
-  // tuning PID control parameters
-  // 0.2 0.0 1.0 as a good start
   std::ofstream logfile;
   std::string logfilename = "./pid.log";
   logfile.open(logfilename);

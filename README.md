@@ -1,6 +1,8 @@
 # CarND-Controls-PID
 Self-Driving Car Engineer Nanodegree Program
 
+**This fork has been heavily modified by olala7846@gmail.com**
+
 ---
 
 ## Dependencies
@@ -27,58 +29,34 @@ Self-Driving Car Engineer Nanodegree Program
 3. Compile: `cmake .. && make`
 4. Run it: `./pid`. 
 
-## Editor Settings
+## Reflections
 
-We've purposefully kept editor configuration files out of this repo in order to
-keep it as simple and environment agnostic as possible. However, we recommend
-using the following settings:
+This project is all about PID controller. 
 
-* indent using spaces
-* set tab width to 2 spaces (keeps the matrices in source code aligned)
+### PID concept
 
-## Code Style
+* The P(proportional) term allows the car to handle all angles of turns so it won't fall out of the lane directly when it comes to sharp right or left (which will happen when using constant turning rate).
+* The D(differential) term stops the car from overshooting and oscillating while turning.
+* The I(integral) term helps to compensate the system error (e.g. wrongly calibrated steering) or environmental errors like side wind, or skewed roads.
 
-Please (do your best to) stick to [Google's C++ style guide](https://google.github.io/styleguide/cppguide.html).
+### Parameter tuning
 
-## Project Instructions and Rubric
+I started with the twiddle (coordinate descent) algorithm but soon found some problems.
 
-Note: regardless of the changes you make, your project must be buildable using
-cmake and make!
+1. The simulator system is stochastic: the simulator was connected to the PID program through a web socket, so many factors could affect the training process. For example, while screen recording on my computer the simulator could react slower to my PID steering commands causing the error to become larger.
 
-More information is only accessible by people who are already enrolled in Term 2
-of CarND. If you are enrolled, see [the project page](https://classroom.udacity.com/nanodegrees/nd013/parts/40f38239-66b6-46ec-ae68-03afd8a601c8/modules/f1820894-8322-4bb3-81aa-b26b3c6dcbaf/lessons/e8235395-22dd-4b87-88e0-d108c5e5bbf4/concepts/6a4d8d42-6a04-4aa6-b284-1697c0fd6562)
-for instructions and the project rubric.
+2. The search space is very large: there are infinite combinations of parameters and results, the car could bump into a tree or fall into water, it is hard to defined which is better, thus the training process could easily be stuck into some local minimum(e.g. in favor of bumping into a tree near the lane then falling info water far away which in both cases are unacceptable)
+3. Parameters are not on the same scale: Ki, Kp and Kd are in different scale, 0.1 difference on differential term may mean a lot but 0.1 difference on the integral term may cause the car to make a U-turn entirely. 
 
-## Hints!
+So I ended up training with gradient descent and with following steps.
 
-* You don't have to follow this directory structure, but if you do, your work
-  will span all of the .cpp files here. Keep an eye out for TODOs.
+* Start training with very short distance and slowly increase it during training.
+* Define a custom function to let the system learn the correct behavior.
+* Handpicked different Delta value for different dimensions.
 
-## Call for IDE Profiles Pull Requests
+#####The training process looks like this.
+[![IMAGE ALT TEXT](http://img.youtube.com/vi/Z1yGxkrT6uY/0.jpg)](http://www.youtube.com/watch?v=Z1yGxkrT6uY "Training In Action")
 
-Help your fellow students!
+#####The results looks like this.
 
-We decided to create Makefiles with cmake to keep this project as platform
-agnostic as possible. Similarly, we omitted IDE profiles in order to we ensure
-that students don't feel pressured to use one IDE or another.
-
-However! I'd love to help people get up and running with their IDEs of choice.
-If you've created a profile for an IDE that you think other students would
-appreciate, we'd love to have you add the requisite profile files and
-instructions to ide_profiles/. For example if you wanted to add a VS Code
-profile, you'd add:
-
-* /ide_profiles/vscode/.vscode
-* /ide_profiles/vscode/README.md
-
-The README should explain what the profile does, how to take advantage of it,
-and how to install it.
-
-Frankly, I've never been involved in a project with multiple IDE profiles
-before. I believe the best way to handle this would be to keep them out of the
-repo root to avoid clutter. My expectation is that most profiles will include
-instructions to copy files to a new location to get picked up by the IDE, but
-that's just a guess.
-
-One last note here: regardless of the IDE used, every submitted project must
-still be compilable with cmake and make./
+[![IMAGE ALT TEXT](http://img.youtube.com/vi/vydjPrH3dGY/0.jpg)](http://www.youtube.com/watch?v=vydjPrH3dGY "Video Title")
